@@ -5,6 +5,13 @@ function showScreen(screenName) {
   screens.forEach((screen) => {
     screen.hidden = screen.id !== `${screenName}-screen`;
   });
+
+  if (
+    screenName === "timer" &&
+    !document.querySelector("#timer-screen")?.classList.contains("interval-timer")
+  ) {
+    window.initializeTimer?.();
+  }
 }
 
 screenButtons.forEach((button) => {
