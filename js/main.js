@@ -12,6 +12,10 @@ function showScreen(screenName) {
   ) {
     window.initializeTimer?.();
   }
+
+  if (screenName === "workout-log") {
+    window.initializeWorkoutLog?.();
+  }
 }
 
 screenButtons.forEach((button) => {
