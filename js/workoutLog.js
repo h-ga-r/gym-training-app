@@ -294,25 +294,72 @@ function renderBodyPartSelection() {
   workoutContent.append(backButton, heading, bodyPartList);
 }
 
-function addExercise(bodyPart) {
-  const enteredName = window.prompt(`${bodyPart}の新しい種目名を入力してください`);
-  const name = enteredName?.trim();
+function renderAddExerciseForm(bodyPart) {
+  workoutContent.replaceChildren();
+  setWorkoutStatus("新しい種目名を入力してください");
 
-  if (!name) {
-    return;
-  }
+  const heading = document.createElement("h2");
+  heading.textContent = "新規種目を追加";
 
-  const data = readWorkoutData();
-  data.exerciseMaster.push({
-    id: createId(),
-    name,
-    bodyPart,
-    lastUsedAt: 0,
-    isHidden: false,
+  const selectedPart = document.createElement("p");
+  selectedPart.className = "workout-log__selected-body-part";
+  selectedPart.textContent = `選択中の部位：${bodyPart}`;
+
+  const form = document.createElement("form");
+  form.className = "workout-log__add-form";
+
+  const nameLabel = document.createElement("label");
+  nameLabel.className = "workout-log__field";
+  const nameLabelText = document.createElement("span");
+  nameLabelText.textContent = "種目名";
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.required = true;
+  nameInput.maxLength = 100;
+  nameInput.autocomplete = "off";
+  nameLabel.append(nameLabelText, nameInput);
+
+  const actions = document.createElement("div");
+  actions.className = "workout-log__add-form-actions";
+
+  const submitButton = document.createElement("button");
+  submitButton.type = "submit";
+  submitButton.className = "workout-log__add-button";
+  submitButton.textContent = "追加";
+
+  const cancelButton = createButton(
+    "キャンセル",
+    () => renderExerciseSelection(bodyPart),
+    "workout-log__cancel-add-button",
+  );
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = nameInput.value.trim();
+
+    if (!name) {
+      setWorkoutStatus("空白だけの種目名は登録できません", true);
+      nameInput.focus();
+      return;
+    }
+
+    const data = readWorkoutData();
+    data.exerciseMaster.push({
+      id: createId(),
+      name,
+      bodyPart,
+      lastUsedAt: 0,
+      isHidden: false,
+    });
+    saveWorkoutData(data);
+    renderExerciseSelection(bodyPart);
+    setWorkoutStatus(`「${name}」を追加しました`);
   });
-  saveWorkoutData(data);
-  renderExerciseSelection(bodyPart);
-  setWorkoutStatus(`「${name}」を追加しました`);
+
+  actions.append(submitButton, cancelButton);
+  form.append(nameLabel, actions);
+  workoutContent.append(heading, selectedPart, form);
+  nameInput.focus();
 }
 
 function hideExercise(exerciseId, bodyPart) {
@@ -378,7 +425,7 @@ function renderExerciseSelection(bodyPart) {
 
   const addButton = createButton(
     "＋ 新規種目を追加",
-    () => addExercise(bodyPart),
+    () => renderAddExerciseForm(bodyPart),
     "workout-log__add-button",
   );
 
@@ -437,7 +484,39 @@ function getRecordedSets(data, date, exerciseId) {
     .sort((a, b) => (Number(a.setNumber) || 0) - (Number(b.setNumber) || 0));
 }
 
-function renderWorkoutEntry(exerciseId) {
+function startWorkoutRest(workoutDate, exerciseId) {
+  if (workoutDate !== getLocalDateString()) {
+    renderCalendar();
+    setWorkoutStatus("日付が変わったため、カレンダーから今日を選び直してください", true);
+    return;
+  }
+
+  const exercise = readWorkoutData().exerciseMaster.find(
+    (item) => item.id === exerciseId && !item.isHidden,
+  );
+
+  if (!exercise) {
+    renderCalendar();
+    setWorkoutStatus("種目が見つからないため休憩を開始できません", true);
+    return;
+  }
+
+  if (!window.prepareWorkoutRestTimer?.({ date: workoutDate, exerciseId })) {
+    setWorkoutStatus("休憩タイマーの準備に失敗しました", true);
+    return;
+  }
+
+  document.dispatchEvent(
+    new CustomEvent("app:navigate", {
+      detail: {
+        screenName: "timer",
+        source: "workout-rest",
+      },
+    }),
+  );
+}
+
+function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
   const data = readWorkoutData();
   const exercise = data.exerciseMaster.find(
     (item) => item.id === exerciseId && !item.isHidden,
@@ -450,6 +529,13 @@ function renderWorkoutEntry(exerciseId) {
   }
 
   const workoutDate = selectedWorkoutDate ?? getLocalDateString();
+
+  if (workoutDate !== getLocalDateString()) {
+    renderCalendar();
+    setWorkoutStatus("日付が変わったため、カレンダーから今日を選び直してください", true);
+    return;
+  }
+
   const recordedSets = getRecordedSets(data, workoutDate, exerciseId);
   selectedExerciseId = exerciseId;
   workoutContent.replaceChildren();
@@ -482,6 +568,46 @@ function renderWorkoutEntry(exerciseId) {
       recordedList.append(item);
     });
     recordedSection.append(recordedList);
+  }
+
+  workoutContent.append(backButton, heading, recordedSection);
+
+  const recordedSetNumbers = new Set(
+    recordedSets
+      .map((set) => Number(set.setNumber))
+      .filter((setNumber) => Number.isInteger(setNumber) && setNumber >= 1 && setNumber <= 10),
+  );
+  const hasRecordedAllSets = recordedSetNumbers.size === 10;
+
+  if (hasRecordedAllSets) {
+    const completeMessage = document.createElement("p");
+    completeMessage.className = "workout-log__complete";
+    completeMessage.textContent = "1〜10セット目まですべて記録済みです。";
+    workoutContent.append(completeMessage);
+    setWorkoutStatus("この種目は10セットの上限に到達しました");
+    return;
+  }
+
+  if (showPostSaveActions) {
+    const actions = document.createElement("section");
+    actions.className = "workout-log__post-save-actions";
+
+    const actionHeading = document.createElement("h3");
+    actionHeading.textContent = "次の操作";
+    const restButton = createButton(
+      "休憩する",
+      () => startWorkoutRest(workoutDate, exerciseId),
+      "workout-log__rest-button",
+    );
+    const continueButton = createButton(
+      "休憩せず続けて記録",
+      () => renderWorkoutEntry(exerciseId),
+      "workout-log__continue-button",
+    );
+
+    actions.append(actionHeading, restButton, continueButton);
+    workoutContent.append(actions);
+    return;
   }
 
   const setNumberChoices = Array.from({ length: 10 }, (_, index) => ({
@@ -549,6 +675,12 @@ function renderWorkoutEntry(exerciseId) {
       return;
     }
 
+    if (workoutDate !== getLocalDateString()) {
+      renderCalendar();
+      setWorkoutStatus("日付が変わったため保存しませんでした。今日を選び直してください", true);
+      return;
+    }
+
     const latestData = readWorkoutData();
     const latestExercise = latestData.exerciseMaster.find(
       (item) => item.id === selectedExerciseId && !item.isHidden,
@@ -580,12 +712,12 @@ function renderWorkoutEntry(exerciseId) {
     });
     latestExercise.lastUsedAt = Date.now();
     saveWorkoutData(latestData);
-    renderWorkoutEntry(latestExercise.id);
+    renderWorkoutEntry(latestExercise.id, { showPostSaveActions: true });
     setWorkoutStatus(`${setNumber}セット目を保存しました`);
   });
 
   form.append(setNumberLabel, weightLabel, repsLabel, submitButton);
-  workoutContent.append(backButton, heading, recordedSection, form);
+  workoutContent.append(form);
 }
 
 function installWorkoutLogStyles() {
@@ -709,6 +841,21 @@ function installWorkoutLogStyles() {
     .workout-log__save-button {
       width: 100%;
     }
+    .workout-log__selected-body-part {
+      padding: .75rem;
+      border-radius: .5rem;
+      background: #eef5fb;
+      font-weight: 700;
+    }
+    .workout-log__add-form {
+      display: grid;
+      gap: 1rem;
+    }
+    .workout-log__add-form-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .75rem;
+    }
     .workout-log__back {
       margin-bottom: 1rem;
     }
@@ -724,6 +871,26 @@ function installWorkoutLogStyles() {
     .workout-log__recorded-sets ol {
       margin-bottom: 0;
       padding-left: 1.5rem;
+    }
+    .workout-log__post-save-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .75rem;
+    }
+    .workout-log__post-save-actions h3 {
+      grid-column: 1 / -1;
+      margin: 0;
+    }
+    .workout-log__rest-button,
+    .workout-log__continue-button {
+      font-weight: 700;
+    }
+    .workout-log__complete {
+      padding: 1rem;
+      border: 2px solid #1769aa;
+      border-radius: .5rem;
+      font-weight: 700;
+      text-align: center;
     }
     .workout-log__form,
     .workout-log__sets {
@@ -755,6 +922,15 @@ function installWorkoutLogStyles() {
       .workout-log button.workout-log__calendar-day {
         min-height: 3.75rem;
       }
+      .workout-log__post-save-actions {
+        grid-template-columns: 1fr;
+      }
+      .workout-log__post-save-actions h3 {
+        grid-column: auto;
+      }
+      .workout-log__add-form-actions {
+        grid-template-columns: 1fr;
+      }
       .workout-log__set {
         display: grid;
       }
@@ -763,16 +939,15 @@ function installWorkoutLogStyles() {
   document.head.append(style);
 }
 
-function initializeWorkoutLog() {
+function ensureWorkoutLogInitialized() {
   if (isWorkoutLogInitialized) {
-    renderCalendar();
-    return;
+    return true;
   }
 
   workoutScreen = document.querySelector("#workout-log-screen");
 
   if (!workoutScreen) {
-    return;
+    return false;
   }
 
   isWorkoutLogInitialized = true;
@@ -790,6 +965,57 @@ function initializeWorkoutLog() {
 
   workoutContent = document.createElement("div");
   workoutScreen.append(heading, workoutStatus, workoutContent);
+  return true;
+}
+
+function initializeWorkoutLog() {
+  if (!ensureWorkoutLogInitialized()) {
+    return;
+  }
+
   renderCalendar();
 }
 
+function resumeWorkoutAfterRest(returnContext) {
+  if (!ensureWorkoutLogInitialized()) {
+    return;
+  }
+
+  if (
+    !returnContext ||
+    typeof returnContext.date !== "string" ||
+    typeof returnContext.exerciseId !== "string"
+  ) {
+    renderCalendar();
+    setWorkoutStatus("タイマーが終了しました。カレンダーから記録を選択してください");
+    return;
+  }
+
+  if (returnContext.date !== getLocalDateString()) {
+    renderCalendar();
+    setWorkoutStatus("日付が変わったため、次セット画面には復帰しませんでした", true);
+    return;
+  }
+
+  const exercise = readWorkoutData().exerciseMaster.find(
+    (item) => item.id === returnContext.exerciseId,
+  );
+
+  if (!exercise || exercise.isHidden) {
+    renderCalendar();
+    setWorkoutStatus(
+      exercise
+        ? "対象の種目が非表示のため、次セット画面には復帰しませんでした"
+        : "対象の種目が見つからないため、次セット画面には復帰しませんでした",
+      true,
+    );
+    return;
+  }
+
+  selectedWorkoutDate = returnContext.date;
+  selectedBodyPart = exercise.bodyPart;
+  renderWorkoutEntry(exercise.id);
+  setWorkoutStatus("休憩が終了しました。次のセットを記録できます");
+}
+
+window.resumeWorkoutAfterRest = resumeWorkoutAfterRest;

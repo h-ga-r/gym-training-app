@@ -1,4 +1,5 @@
 const TIMER_STORAGE_KEY = "gymTrainingApp.intervalTimer";
+const TIMER_RETURN_STORAGE_KEY = "gymTrainingApp.workoutTimerReturn";
 const DEFAULT_PRESETS = [60, 90, 120, 180];
 
 let timerScreen;
@@ -35,6 +36,88 @@ function saveTimerState(durationSeconds) {
 
   localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify(state));
   return state;
+}
+
+function readWorkoutTimerReturnContext() {
+  try {
+    const context = JSON.parse(localStorage.getItem(TIMER_RETURN_STORAGE_KEY));
+    const hasValidTimerStart =
+      context?.timerStartedAt === null || Number.isFinite(context?.timerStartedAt);
+
+    if (
+      typeof context?.date === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(context.date) &&
+      typeof context.exerciseId === "string" &&
+      context.exerciseId.length > 0 &&
+      Number.isFinite(context.createdAt) &&
+      hasValidTimerStart
+    ) {
+      return context;
+    }
+  } catch {
+    // 壊れた復帰情報は使用しない。
+  }
+
+  localStorage.removeItem(TIMER_RETURN_STORAGE_KEY);
+  return null;
+}
+
+function prepareWorkoutRestTimer({ date, exerciseId }) {
+  if (
+    typeof date !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    typeof exerciseId !== "string" ||
+    exerciseId.length === 0
+  ) {
+    localStorage.removeItem(TIMER_RETURN_STORAGE_KEY);
+    return false;
+  }
+
+  localStorage.setItem(
+    TIMER_RETURN_STORAGE_KEY,
+    JSON.stringify({
+      date,
+      exerciseId,
+      createdAt: Date.now(),
+      timerStartedAt: null,
+    }),
+  );
+  return true;
+}
+
+function attachWorkoutReturnContextToTimer(startedAt) {
+  const context = readWorkoutTimerReturnContext();
+
+  if (!context) {
+    return;
+  }
+
+  context.timerStartedAt = startedAt;
+  localStorage.setItem(TIMER_RETURN_STORAGE_KEY, JSON.stringify(context));
+}
+
+function clearWorkoutTimerReturnContext() {
+  localStorage.removeItem(TIMER_RETURN_STORAGE_KEY);
+}
+
+function prepareStandaloneTimer() {
+  const timerState = readTimerState();
+  const context = readWorkoutTimerReturnContext();
+
+  if (!timerState || context?.timerStartedAt !== timerState.startedAt) {
+    clearWorkoutTimerReturnContext();
+  }
+}
+
+function getCompletedWorkoutReturnContext() {
+  const timerState = readTimerState();
+  const context = readWorkoutTimerReturnContext();
+
+  if (!timerState || context?.timerStartedAt !== timerState.startedAt) {
+    return null;
+  }
+
+  return context;
 }
 
 function formatTime(totalSeconds) {
@@ -164,13 +247,15 @@ function syncWakeLock() {
 
 function startTimer(durationSeconds) {
   unlockAudioPlayback();
-  saveTimerState(durationSeconds);
+  const state = saveTimerState(durationSeconds);
+  attachWorkoutReturnContextToTimer(state.startedAt);
   updateCountdown();
   void requestWakeLock();
 }
 
 function cancelTimer() {
   localStorage.removeItem(TIMER_STORAGE_KEY);
+  clearWorkoutTimerReturnContext();
   stopCountdownLoop();
   isAlarmActive = false;
   document.body.classList.remove("interval-timer-alarm");
@@ -184,10 +269,19 @@ function acknowledgeAlarm(event) {
 
   event.preventDefault();
   event.stopImmediatePropagation();
+  const returnContext = getCompletedWorkoutReturnContext();
   cancelTimer();
 
   queueMicrotask(() => {
-    document.querySelector('[data-screen-target="workout-log"]')?.click();
+    document.dispatchEvent(
+      new CustomEvent("app:navigate", {
+        detail: {
+          screenName: "workout-log",
+          source: "timer-complete",
+          returnContext,
+        },
+      }),
+    );
   });
 }
 
@@ -347,4 +441,7 @@ if (document.readyState === "loading") {
 } else {
   initializeTimer();
 }
+
+window.prepareWorkoutRestTimer = prepareWorkoutRestTimer;
+window.prepareStandaloneTimer = prepareStandaloneTimer;
 

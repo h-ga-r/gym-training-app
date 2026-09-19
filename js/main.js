@@ -1,7 +1,11 @@
 const screens = document.querySelectorAll("[data-screen]");
 const screenButtons = document.querySelectorAll("[data-screen-target]");
 
-function showScreen(screenName) {
+function showScreen(screenName, { source = "navigation", returnContext = null } = {}) {
+  if (screenName === "timer" && source === "navigation") {
+    window.prepareStandaloneTimer?.();
+  }
+
   screens.forEach((screen) => {
     screen.hidden = screen.id !== `${screenName}-screen`;
   });
@@ -14,12 +18,24 @@ function showScreen(screenName) {
   }
 
   if (screenName === "workout-log") {
-    window.initializeWorkoutLog?.();
+    if (source === "timer-complete") {
+      window.resumeWorkoutAfterRest?.(returnContext);
+    } else {
+      window.initializeWorkoutLog?.();
+    }
   }
 }
 
 screenButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    showScreen(button.dataset.screenTarget);
+    showScreen(button.dataset.screenTarget, { source: "navigation" });
   });
+});
+
+document.addEventListener("app:navigate", (event) => {
+  const { screenName, source, returnContext } = event.detail ?? {};
+
+  if (typeof screenName === "string") {
+    showScreen(screenName, { source, returnContext });
+  }
 });
