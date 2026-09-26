@@ -1,13 +1,18 @@
 const WORKOUT_STORAGE_KEY = "gymTrainingApp.workoutData";
+const ENTRY_DRAFT_KEY = "gymTrainingApp.entryDraft";
 const BODY_PARTS = ["胸", "背中", "脚", "肩", "腕", "腹", "有酸素", "その他"];
+const WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
 
 let workoutScreen;
 let workoutContent;
 let workoutStatus;
+let homeScreen;
 let selectedBodyPart = null;
 let selectedExerciseId = null;
 let selectedWorkoutDate = null;
+let navigationSource = "home";
 let isWorkoutLogInitialized = false;
+let isHomeInitialized = false;
 let displayedCalendarYear;
 let displayedCalendarMonth;
 
@@ -60,17 +65,58 @@ function createId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function getLocalDateString() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function parseLocalDate(dateString) {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function addDays(dateString, amount) {
+  const date = parseLocalDate(dateString);
+  date.setDate(date.getDate() + amount);
+  return getLocalDateString(date);
+}
+
+function daysBetween(fromDate, toDate) {
+  const from = parseLocalDate(fromDate);
+  const to = parseLocalDate(toDate);
+  return Math.round((to.getTime() - from.getTime()) / 86400000);
+}
+
+function formatDisplayDate(dateString) {
+  const date = parseLocalDate(dateString);
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function formatDaysAgo(days) {
+  if (days === 0) {
+    return "今日";
+  }
+
+  if (days === 1) {
+    return "1日前";
+  }
+
+  return `${days}日前`;
+}
+
+function getMondayOfWeek(dateString) {
+  const date = parseLocalDate(dateString);
+  const weekday = date.getDay();
+  const offset = weekday === 0 ? 6 : weekday - 1;
+  date.setDate(date.getDate() - offset);
+  return getLocalDateString(date);
 }
 
 function setWorkoutStatus(message, isError = false) {
   workoutStatus.textContent = message;
-  workoutStatus.classList.toggle("workout-log__status--error", isError);
+  workoutStatus.classList.toggle("app-status--error", isError);
 }
 
 function createButton(label, onClick, className = "") {
@@ -90,19 +136,201 @@ function formatCalendarDate(year, month, day) {
   ].join("-");
 }
 
+function getExerciseMap(data) {
+  return new Map(data.exerciseMaster.map((exercise) => [exercise.id, exercise]));
+}
+
+function expandLogSets(log) {
+  if (Array.isArray(log.sets)) {
+    return log.sets.map((set, index) => ({
+      ...set,
+      setNumber: index + 1,
+      date: log.date,
+      exerciseId: log.exerciseId,
+    }));
+  }
+
+  return [log];
+}
+
 function getBodyPartsForDate(date, data) {
-  const exerciseBodyParts = new Map(
-    data.exerciseMaster.map((exercise) => [exercise.id, exercise.bodyPart]),
-  );
+  const exerciseMap = getExerciseMap(data);
 
   return [
     ...new Set(
       data.workoutLogs
         .filter((log) => log.date === date)
-        .map((log) => exerciseBodyParts.get(log.exerciseId))
+        .map((log) => exerciseMap.get(log.exerciseId)?.bodyPart)
         .filter(Boolean),
     ),
   ];
+}
+
+function getRecordedSets(data, date, exerciseId) {
+  return data.workoutLogs
+    .filter((log) => log.date === date && log.exerciseId === exerciseId)
+    .flatMap(expandLogSets)
+    .sort((a, b) => (Number(a.setNumber) || 0) - (Number(b.setNumber) || 0));
+}
+
+function getPreviousExerciseDate(data, exerciseId, today) {
+  const dates = [
+    ...new Set(
+      data.workoutLogs
+        .filter((log) => log.exerciseId === exerciseId && log.date < today)
+        .map((log) => log.date),
+    ),
+  ].sort();
+
+  return dates.at(-1) ?? null;
+}
+
+function getLatestDateBefore(data, today) {
+  const dates = [
+    ...new Set(data.workoutLogs.map((log) => log.date).filter((date) => date < today)),
+  ].sort();
+
+  return dates.at(-1) ?? null;
+}
+
+function countTodayLogs(data, today) {
+  const todayLogs = data.workoutLogs.filter((log) => log.date === today);
+  const exerciseIds = new Set(todayLogs.map((log) => log.exerciseId));
+  return {
+    setCount: todayLogs.flatMap(expandLogSets).length,
+    exerciseCount: exerciseIds.size,
+  };
+}
+
+function getLastDateByBodyPart(data) {
+  const exerciseMap = getExerciseMap(data);
+  const lastDates = new Map();
+
+  data.workoutLogs.forEach((log) => {
+    const bodyPart = exerciseMap.get(log.exerciseId)?.bodyPart;
+
+    if (!bodyPart) {
+      return;
+    }
+
+    const current = lastDates.get(bodyPart);
+    if (!current || log.date > current) {
+      lastDates.set(bodyPart, log.date);
+    }
+  });
+
+  return lastDates;
+}
+
+function getWeekTrainingDays(data, today) {
+  const weekStart = getMondayOfWeek(today);
+  const weekEnd = addDays(weekStart, 6);
+  const trainedDates = [
+    ...new Set(
+      data.workoutLogs
+        .map((log) => log.date)
+        .filter((date) => date >= weekStart && date <= weekEnd && date <= today),
+    ),
+  ].sort();
+
+  return { weekStart, weekEnd, trainedDates };
+}
+
+function formatSetLine(set) {
+  const reps = set.toFailure || set.reps === null ? "限界まで" : `${set.reps}回`;
+  return `${set.setNumber}セット目：${set.weight}kg × ${reps}`;
+}
+
+function readEntryDraft() {
+  try {
+    const draft = JSON.parse(sessionStorage.getItem(ENTRY_DRAFT_KEY));
+
+    if (
+      draft &&
+      typeof draft.exerciseId === "string" &&
+      typeof draft.date === "string"
+    ) {
+      return draft;
+    }
+  } catch {
+    // 下書きが壊れていても記録データには触れない。
+  }
+
+  return null;
+}
+
+function saveEntryDraft(draft) {
+  sessionStorage.setItem(ENTRY_DRAFT_KEY, JSON.stringify(draft));
+}
+
+function clearEntryDraft() {
+  sessionStorage.removeItem(ENTRY_DRAFT_KEY);
+}
+
+function suggestedWeight(todaySets, previousSets, setNumber) {
+  if (todaySets.length > 0) {
+    const latestToday = [...todaySets].sort(
+      (a, b) =>
+        (Number(b.recordedAt) || 0) - (Number(a.recordedAt) || 0) ||
+        (Number(b.setNumber) || 0) - (Number(a.setNumber) || 0),
+    )[0];
+
+    if (Number.isFinite(Number(latestToday.weight))) {
+      return String(latestToday.weight);
+    }
+  }
+
+  const sameNumber = previousSets.find(
+    (set) => Number(set.setNumber) === Number(setNumber),
+  );
+  if (Number.isFinite(Number(sameNumber?.weight))) {
+    return String(sameNumber.weight);
+  }
+
+  const lastPrevious = previousSets.at(-1);
+  if (Number.isFinite(Number(lastPrevious?.weight))) {
+    return String(lastPrevious.weight);
+  }
+
+  return "";
+}
+
+function navigateToHome() {
+  document.dispatchEvent(
+    new CustomEvent("app:navigate", {
+      detail: { screenName: "home", source: "workout" },
+    }),
+  );
+}
+
+function startTodayWorkout() {
+  if (!ensureWorkoutLogInitialized()) {
+    return;
+  }
+
+  selectedWorkoutDate = getLocalDateString();
+  navigationSource = "home";
+  renderBodyPartSelection();
+}
+
+function openWorkoutCalendar() {
+  if (!ensureWorkoutLogInitialized()) {
+    return;
+  }
+
+  navigationSource = "calendar";
+  renderCalendar();
+}
+
+function openDailyRecords(date, { from = "calendar" } = {}) {
+  if (!ensureWorkoutLogInitialized() || typeof date !== "string") {
+    return;
+  }
+
+  navigationSource = from;
+  displayedCalendarYear = parseLocalDate(date).getFullYear();
+  displayedCalendarMonth = parseLocalDate(date).getMonth();
+  renderDailyRecords(date);
 }
 
 function renderCalendar(year = new Date().getFullYear(), month = new Date().getMonth()) {
@@ -111,13 +339,10 @@ function renderCalendar(year = new Date().getFullYear(), month = new Date().getM
   selectedBodyPart = null;
   selectedExerciseId = null;
   workoutContent.replaceChildren();
-  setWorkoutStatus("日付を選択してください");
+  setWorkoutStatus("振り返りたい日付を選んでください");
 
   const today = new Date();
-  const currentYear = today.getFullYear();
-  const currentMonth = today.getMonth();
-  const isCurrentMonth = year === currentYear && month === currentMonth;
-
+  const isCurrentMonth = year === today.getFullYear() && month === today.getMonth();
   const navigation = document.createElement("div");
   navigation.className = "workout-log__calendar-navigation";
 
@@ -125,21 +350,17 @@ function renderCalendar(year = new Date().getFullYear(), month = new Date().getM
     const previousMonth = new Date(year, month - 1, 1);
     renderCalendar(previousMonth.getFullYear(), previousMonth.getMonth());
   });
-
   const heading = document.createElement("h2");
   heading.textContent = `${year}年${month + 1}月`;
-
   const nextButton = createButton("次月 →", () => {
     const nextMonth = new Date(year, month + 1, 1);
     renderCalendar(nextMonth.getFullYear(), nextMonth.getMonth());
   });
   nextButton.disabled = isCurrentMonth;
-
   navigation.append(previousButton, heading, nextButton);
 
   const calendar = document.createElement("div");
   calendar.className = "workout-log__calendar";
-
   ["日", "月", "火", "水", "木", "金", "土"].forEach((weekday) => {
     const weekdayLabel = document.createElement("div");
     weekdayLabel.className = "workout-log__weekday";
@@ -166,6 +387,7 @@ function renderCalendar(year = new Date().getFullYear(), month = new Date().getM
       () => {
         if (date === todayString) {
           selectedWorkoutDate = date;
+          navigationSource = "calendar";
           renderBodyPartSelection();
         } else {
           renderDailyRecords(date);
@@ -194,11 +416,21 @@ function renderCalendar(year = new Date().getFullYear(), month = new Date().getM
 
 function renderDailyRecords(date) {
   workoutContent.replaceChildren();
-  setWorkoutStatus("この日は閲覧専用です");
+  setWorkoutStatus(
+    date === getLocalDateString()
+      ? "今日の記録です。追加する場合は種目を選び直してください"
+      : "この日は閲覧専用です",
+  );
 
   const backButton = createButton(
-    "← カレンダーへ戻る",
-    () => renderCalendar(displayedCalendarYear, displayedCalendarMonth),
+    navigationSource === "home" ? "← ホームへ戻る" : "← カレンダーへ戻る",
+    () => {
+      if (navigationSource === "home") {
+        navigateToHome();
+      } else {
+        renderCalendar(displayedCalendarYear, displayedCalendarMonth);
+      }
+    },
     "workout-log__back",
   );
   const heading = document.createElement("h2");
@@ -208,9 +440,7 @@ function renderDailyRecords(date) {
 
   const data = readWorkoutData();
   const logs = data.workoutLogs.filter((log) => log.date === date);
-  const exerciseMap = new Map(
-    data.exerciseMaster.map((exercise) => [exercise.id, exercise]),
-  );
+  const exerciseMap = getExerciseMap(data);
   const logsByExercise = new Map();
 
   logs.forEach((log) => {
@@ -229,33 +459,20 @@ function renderDailyRecords(date) {
     const exercise = exerciseMap.get(exerciseId);
     const section = document.createElement("section");
     section.className = "workout-log__daily-exercise";
-
     const exerciseHeading = document.createElement("h3");
     exerciseHeading.textContent = exercise
       ? `${exercise.name}（${exercise.bodyPart}）`
       : "不明な種目";
-
     const setList = document.createElement("ol");
     setList.className = "workout-log__daily-sets";
-
     exerciseLogs
-      .flatMap((log) => {
-        if (Array.isArray(log.sets)) {
-          return log.sets.map((set, index) => ({
-            ...set,
-            setNumber: index + 1,
-          }));
-        }
-        return [log];
-      })
+      .flatMap(expandLogSets)
       .sort((a, b) => (Number(a.setNumber) || 0) - (Number(b.setNumber) || 0))
       .forEach((set) => {
         const item = document.createElement("li");
-        const reps = set.toFailure || set.reps === null ? "限界まで" : `${set.reps}回`;
-        item.textContent = `${set.setNumber}セット目：${set.weight}kg × ${reps}`;
+        item.textContent = formatSetLine(set);
         setList.append(item);
       });
-
     section.append(exerciseHeading, setList);
     records.append(section);
   });
@@ -270,14 +487,18 @@ function renderBodyPartSelection() {
   setWorkoutStatus("部位を選択してください");
 
   const heading = document.createElement("h2");
-  heading.textContent = "1. 部位を選択";
-
+  heading.textContent = "部位を選択";
   const backButton = createButton(
-    "← カレンダーへ戻る",
-    () => renderCalendar(new Date().getFullYear(), new Date().getMonth()),
+    navigationSource === "calendar" ? "← カレンダーへ戻る" : "← ホームへ戻る",
+    () => {
+      if (navigationSource === "calendar") {
+        renderCalendar(new Date().getFullYear(), new Date().getMonth());
+      } else {
+        navigateToHome();
+      }
+    },
     "workout-log__back",
   );
-
   const bodyPartList = document.createElement("div");
   bodyPartList.className = "workout-log__body-parts";
 
@@ -300,14 +521,11 @@ function renderAddExerciseForm(bodyPart) {
 
   const heading = document.createElement("h2");
   heading.textContent = "新規種目を追加";
-
   const selectedPart = document.createElement("p");
   selectedPart.className = "workout-log__selected-body-part";
   selectedPart.textContent = `選択中の部位：${bodyPart}`;
-
   const form = document.createElement("form");
   form.className = "workout-log__add-form";
-
   const nameLabel = document.createElement("label");
   nameLabel.className = "workout-log__field";
   const nameLabelText = document.createElement("span");
@@ -321,12 +539,10 @@ function renderAddExerciseForm(bodyPart) {
 
   const actions = document.createElement("div");
   actions.className = "workout-log__add-form-actions";
-
   const submitButton = document.createElement("button");
   submitButton.type = "submit";
   submitButton.className = "workout-log__add-button";
   submitButton.textContent = "追加";
-
   const cancelButton = createButton(
     "キャンセル",
     () => renderExerciseSelection(bodyPart),
@@ -383,8 +599,7 @@ function renderExerciseSelection(bodyPart) {
   setWorkoutStatus(`${bodyPart}の種目を選択してください`);
 
   const heading = document.createElement("h2");
-  heading.textContent = `2. ${bodyPart}の種目を選択`;
-
+  heading.textContent = `${bodyPart}の種目`;
   const backButton = createButton(
     "← 部位選択へ戻る",
     renderBodyPartSelection,
@@ -392,7 +607,6 @@ function renderExerciseSelection(bodyPart) {
   );
   const exerciseList = document.createElement("div");
   exerciseList.className = "workout-log__exercise-list";
-
   const exercises = readWorkoutData()
     .exerciseMaster.filter(
       (exercise) => exercise.bodyPart === bodyPart && !exercise.isHidden,
@@ -401,6 +615,7 @@ function renderExerciseSelection(bodyPart) {
 
   if (exercises.length === 0) {
     const emptyMessage = document.createElement("p");
+    emptyMessage.className = "app-muted";
     emptyMessage.textContent = "登録済みの種目はありません。";
     exerciseList.append(emptyMessage);
   }
@@ -424,27 +639,23 @@ function renderExerciseSelection(bodyPart) {
   });
 
   const addButton = createButton(
-    "＋ 新規種目を追加",
+    "新規種目を追加",
     () => renderAddExerciseForm(bodyPart),
     "workout-log__add-button",
   );
-
   workoutContent.append(backButton, heading, exerciseList, addButton);
 }
 
 function createNumberInput(labelText, options) {
   const label = document.createElement("label");
   label.className = "workout-log__field";
-
   const labelName = document.createElement("span");
   labelName.textContent = labelText;
-
   const input = document.createElement("input");
   input.type = "number";
   Object.entries(options).forEach(([key, value]) => {
     input[key] = value;
   });
-
   label.append(labelName, input);
   return { label, input };
 }
@@ -452,10 +663,8 @@ function createNumberInput(labelText, options) {
 function createSelect(labelText, choices, selectedValue) {
   const label = document.createElement("label");
   label.className = "workout-log__field";
-
   const labelName = document.createElement("span");
   labelName.textContent = labelText;
-
   const select = document.createElement("select");
   choices.forEach(({ value, label: optionLabel }) => {
     const option = document.createElement("option");
@@ -464,24 +673,34 @@ function createSelect(labelText, choices, selectedValue) {
     select.append(option);
   });
   select.value = selectedValue;
-
   label.append(labelName, select);
   return { label, select };
 }
 
-function getRecordedSets(data, date, exerciseId) {
-  return data.workoutLogs
-    .filter((log) => log.date === date && log.exerciseId === exerciseId)
-    .flatMap((log) => {
-      if (Array.isArray(log.sets)) {
-        return log.sets.map((set, index) => ({
-          ...set,
-          setNumber: index + 1,
-        }));
-      }
-      return [log];
-    })
-    .sort((a, b) => (Number(a.setNumber) || 0) - (Number(b.setNumber) || 0));
+function createSetList(title, sets, emptyText) {
+  const section = document.createElement("section");
+  section.className =
+    title.startsWith("今日") ? "workout-log__recorded-sets" : "workout-log__previous-sets";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  section.append(heading);
+
+  if (sets.length === 0) {
+    const emptyMessage = document.createElement("p");
+    emptyMessage.className = "app-muted";
+    emptyMessage.textContent = emptyText;
+    section.append(emptyMessage);
+    return section;
+  }
+
+  const list = document.createElement("ol");
+  sets.forEach((set) => {
+    const item = document.createElement("li");
+    item.textContent = formatSetLine(set);
+    list.append(item);
+  });
+  section.append(list);
+  return section;
 }
 
 function startWorkoutRest(workoutDate, exerciseId) {
@@ -537,6 +756,10 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
   }
 
   const recordedSets = getRecordedSets(data, workoutDate, exerciseId);
+  const previousDate = getPreviousExerciseDate(data, exerciseId, workoutDate);
+  const previousSets = previousDate
+    ? getRecordedSets(data, previousDate, exerciseId)
+    : [];
   selectedExerciseId = exerciseId;
   workoutContent.replaceChildren();
   setWorkoutStatus("1セット分の重量と回数を入力してください");
@@ -547,30 +770,20 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
     "workout-log__back",
   );
   const heading = document.createElement("h2");
-  heading.textContent = `3. ${exercise.name}を記録`;
+  heading.textContent = exercise.name;
 
-  const recordedSection = document.createElement("section");
-  recordedSection.className = "workout-log__recorded-sets";
-  const recordedHeading = document.createElement("h3");
-  recordedHeading.textContent = "記録済みセット";
-  recordedSection.append(recordedHeading);
-
-  if (recordedSets.length === 0) {
-    const emptyMessage = document.createElement("p");
-    emptyMessage.textContent = "まだ記録はありません。";
-    recordedSection.append(emptyMessage);
-  } else {
-    const recordedList = document.createElement("ol");
-    recordedSets.forEach((set) => {
-      const item = document.createElement("li");
-      const reps = set.toFailure || set.reps === null ? "限界まで" : `${set.reps}回`;
-      item.textContent = `${set.setNumber}セット目：${set.weight}kg × ${reps}`;
-      recordedList.append(item);
-    });
-    recordedSection.append(recordedList);
-  }
-
-  workoutContent.append(backButton, heading, recordedSection);
+  workoutContent.append(
+    backButton,
+    heading,
+    createSetList(
+      previousDate
+        ? `前回（${formatDisplayDate(previousDate)}）`
+        : "前回の記録",
+      previousSets,
+      "前回の記録はまだありません。今日の内容から記録できます。",
+    ),
+    createSetList("今日の記録", recordedSets, "まだ今日の記録はありません。"),
+  );
 
   const recordedSetNumbers = new Set(
     recordedSets
@@ -591,21 +804,21 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
   if (showPostSaveActions) {
     const actions = document.createElement("section");
     actions.className = "workout-log__post-save-actions";
-
     const actionHeading = document.createElement("h3");
     actionHeading.textContent = "次の操作";
-    const restButton = createButton(
-      "休憩する",
-      () => startWorkoutRest(workoutDate, exerciseId),
-      "workout-log__rest-button",
+    actions.append(
+      actionHeading,
+      createButton(
+        "休憩する",
+        () => startWorkoutRest(workoutDate, exerciseId),
+        "workout-log__rest-button",
+      ),
+      createButton(
+        "休憩せず続けて記録",
+        () => renderWorkoutEntry(exerciseId),
+        "workout-log__continue-button",
+      ),
     );
-    const continueButton = createButton(
-      "休憩せず続けて記録",
-      () => renderWorkoutEntry(exerciseId),
-      "workout-log__continue-button",
-    );
-
-    actions.append(actionHeading, restButton, continueButton);
     workoutContent.append(actions);
     return;
   }
@@ -615,23 +828,33 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
     label: `${index + 1}セット目`,
   }));
   const firstUnusedSetNumber =
-    setNumberChoices.find(
-      ({ value }) => !recordedSets.some((set) => Number(set.setNumber) === Number(value)),
-    )?.value ?? "10";
+    setNumberChoices.find(({ value }) => !recordedSetNumbers.has(Number(value)))
+      ?.value ?? "10";
+  const draft = readEntryDraft();
+  const canUseDraft =
+    draft?.exerciseId === exerciseId &&
+    draft.date === workoutDate &&
+    !recordedSetNumbers.has(Number(draft.setNumber));
+  const initialSetNumber = canUseDraft
+    ? String(draft.setNumber)
+    : firstUnusedSetNumber;
+  const initialWeight = canUseDraft && draft.weight !== ""
+    ? String(draft.weight)
+    : suggestedWeight(recordedSets, previousSets, initialSetNumber);
+  const initialReps = canUseDraft && draft.reps ? String(draft.reps) : "10";
+
   const { label: setNumberLabel, select: setNumberInput } = createSelect(
     "何セット目か",
     setNumberChoices,
-    firstUnusedSetNumber,
+    initialSetNumber,
   );
-
   const { label: weightLabel, input: weightInput } = createNumberInput("重量 (kg)", {
     min: "0",
     step: "0.1",
     required: true,
-    value: "",
+    value: initialWeight,
     inputMode: "decimal",
   });
-
   const repChoices = ["3", "5", "6", "9", "10", "12", "15", "18", "20"].map(
     (value) => ({ value, label: value }),
   );
@@ -639,8 +862,34 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
   const { label: repsLabel, select: repsInput } = createSelect(
     "回数",
     repChoices,
-    "10",
+    initialReps,
   );
+
+  let lastSuggestedWeight = initialWeight;
+  const persistDraft = () => {
+    saveEntryDraft({
+      exerciseId,
+      date: workoutDate,
+      setNumber: setNumberInput.value,
+      weight: weightInput.value,
+      reps: repsInput.value,
+    });
+  };
+
+  setNumberInput.addEventListener("change", () => {
+    const nextSuggestion = suggestedWeight(
+      recordedSets,
+      previousSets,
+      setNumberInput.value,
+    );
+    if (weightInput.value === "" || weightInput.value === lastSuggestedWeight) {
+      weightInput.value = nextSuggestion;
+      lastSuggestedWeight = nextSuggestion;
+    }
+    persistDraft();
+  });
+  weightInput.addEventListener("input", persistDraft);
+  repsInput.addEventListener("change", persistDraft);
 
   const form = document.createElement("form");
   form.className = "workout-log__form";
@@ -712,231 +961,177 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
     });
     latestExercise.lastUsedAt = Date.now();
     saveWorkoutData(latestData);
+    clearEntryDraft();
     renderWorkoutEntry(latestExercise.id, { showPostSaveActions: true });
     setWorkoutStatus(`${setNumber}セット目を保存しました`);
   });
 
   form.append(setNumberLabel, weightLabel, repsLabel, submitButton);
   workoutContent.append(form);
+  persistDraft();
 }
 
-function installWorkoutLogStyles() {
-  const style = document.createElement("style");
-  style.textContent = `
-    .workout-log {
-      box-sizing: border-box;
-      max-width: 40rem;
-      margin: 0 auto;
-      padding: 1.25rem;
+function renderHome() {
+  const today = getLocalDateString();
+  const data = readWorkoutData();
+  const previousDate = getLatestDateBefore(data, today);
+  const todayCounts = countTodayLogs(data, today);
+  const lastDates = getLastDateByBodyPart(data);
+  const week = getWeekTrainingDays(data, today);
+
+  homeScreen.replaceChildren();
+  const heading = document.createElement("h1");
+  heading.textContent = "ホーム";
+  homeScreen.append(heading);
+
+  const previousCard = document.createElement("section");
+  previousCard.className = "app-card";
+  const previousHeading = document.createElement("h2");
+  previousHeading.textContent = "前回のトレーニング";
+  previousCard.append(previousHeading);
+
+  if (!previousDate) {
+    const empty = document.createElement("p");
+    empty.className = "app-muted";
+    empty.textContent = "まだ過去の記録はありません。今日の内容から残せます。";
+    previousCard.append(empty);
+  } else {
+    const daysAgo = daysBetween(previousDate, today);
+    const parts = getBodyPartsForDate(previousDate, data);
+    const summary = document.createElement("p");
+    summary.className = "home-meta";
+    const dateChip = document.createElement("span");
+    dateChip.className = "home-chip";
+    dateChip.textContent = formatDisplayDate(previousDate);
+    const agoChip = document.createElement("span");
+    agoChip.className = "home-chip";
+    agoChip.textContent = formatDaysAgo(daysAgo);
+    summary.append(dateChip, agoChip);
+    const partText = document.createElement("p");
+    partText.textContent = parts.length > 0 ? `部位：${parts.join("・")}` : "部位：記録あり";
+    previousCard.append(
+      summary,
+      partText,
+      createButton(
+        "内容を見る",
+        () => {
+          document.dispatchEvent(
+            new CustomEvent("app:navigate", {
+              detail: {
+                screenName: "workout-log",
+                source: "view-date",
+                returnContext: { date: previousDate },
+              },
+            }),
+          );
+        },
+        "app-secondary",
+      ),
+    );
+  }
+
+  homeScreen.append(previousCard);
+
+  if (todayCounts.setCount > 0) {
+    const todayCard = document.createElement("section");
+    todayCard.className = "app-card";
+    const todayHeading = document.createElement("h2");
+    todayHeading.textContent = "今日の記録";
+    const todayText = document.createElement("p");
+    todayText.textContent = `${todayCounts.exerciseCount}種目・${todayCounts.setCount}セットを記録済みです。`;
+    todayCard.append(todayHeading, todayText);
+    homeScreen.append(todayCard);
+  }
+
+  const ctaWrap = document.createElement("div");
+  ctaWrap.className = "home-cta";
+  ctaWrap.append(
+    createButton(
+      todayCounts.setCount > 0 ? "今日のトレーニングを続ける" : "今日のトレーニングを始める",
+      () => {
+        document.dispatchEvent(
+          new CustomEvent("app:navigate", {
+            detail: { screenName: "workout-log", source: "home-start" },
+          }),
+        );
+      },
+      "app-primary",
+    ),
+  );
+  homeScreen.append(ctaWrap);
+
+  const bodyCard = document.createElement("section");
+  bodyCard.className = "app-card";
+  const bodyHeading = document.createElement("h2");
+  bodyHeading.textContent = "部位ごとの最終記録";
+  const note = document.createElement("p");
+  note.className = "app-muted";
+  note.textContent = "最後に記録した日から数えています。回復の目安ではなく、振り返り用です。";
+  const list = document.createElement("div");
+  list.className = "home-body-parts";
+  BODY_PARTS.forEach((bodyPart) => {
+    const row = document.createElement("div");
+    row.className = "home-body-part";
+    const name = document.createElement("span");
+    name.textContent = bodyPart;
+    const value = document.createElement("span");
+    const lastDate = lastDates.get(bodyPart);
+    if (!lastDate) {
+      value.textContent = "未記録";
+    } else {
+      value.textContent = `${formatDisplayDate(lastDate)}（${formatDaysAgo(daysBetween(lastDate, today))}）`;
     }
-    .workout-log h1,
-    .workout-log h2 {
-      margin-top: 0;
-    }
-    .workout-log__status {
-      min-height: 1.5em;
-    }
-    .workout-log__status--error {
-      color: #b00020;
-    }
-    .workout-log__calendar-navigation {
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
-      align-items: center;
-      gap: .5rem;
-      margin-bottom: 1rem;
-    }
-    .workout-log__calendar-navigation h2 {
-      margin: 0;
-      text-align: center;
-      white-space: nowrap;
-    }
-    .workout-log__calendar {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-      gap: .25rem;
-    }
-    .workout-log__weekday {
-      padding: .4rem 0;
-      font-weight: 700;
-      text-align: center;
-    }
-    .workout-log__calendar-day {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      min-height: 4.5rem;
-      overflow: hidden;
-      text-align: left;
-    }
-    .workout-log__calendar-day--today {
-      border: 3px solid #1769aa;
-      font-weight: 700;
-    }
-    .workout-log__body-part-labels {
-      display: block;
-      width: 100%;
-      margin-top: .25rem;
-      overflow: hidden;
-      color: #1769aa;
-      font-size: .7rem;
-      font-weight: 700;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .workout-log__daily-records {
-      display: grid;
-      gap: 1rem;
-    }
-    .workout-log__daily-exercise {
-      padding: .75rem;
-      border: 1px solid #ccc;
-      border-radius: .5rem;
-    }
-    .workout-log__daily-exercise h3 {
-      margin-top: 0;
-    }
-    .workout-log__daily-sets {
-      margin-bottom: 0;
-      padding-left: 1.5rem;
-    }
-    .workout-log__body-parts {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: .75rem;
-    }
-    .workout-log button,
-    .workout-log input,
-    .workout-log select {
-      min-height: 3rem;
-      padding: .6rem;
-      font: inherit;
-      box-sizing: border-box;
-    }
-    .workout-log button {
-      touch-action: manipulation;
-    }
-    .workout-log button.workout-log__calendar-day {
-      min-height: 4.5rem;
-    }
-    .workout-log__body-part-button,
-    .workout-log__add-button,
-    .workout-log__save-button {
-      font-weight: 700;
-    }
-    .workout-log__exercise-list {
-      display: grid;
-      gap: .75rem;
-      margin-bottom: 1rem;
-    }
-    .workout-log__exercise-row {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: .5rem;
-    }
-    .workout-log__exercise-button {
-      text-align: left;
-    }
-    .workout-log__add-button,
-    .workout-log__save-button {
-      width: 100%;
-    }
-    .workout-log__selected-body-part {
-      padding: .75rem;
-      border-radius: .5rem;
-      background: #eef5fb;
-      font-weight: 700;
-    }
-    .workout-log__add-form {
-      display: grid;
-      gap: 1rem;
-    }
-    .workout-log__add-form-actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: .75rem;
-    }
-    .workout-log__back {
-      margin-bottom: 1rem;
-    }
-    .workout-log__recorded-sets {
-      margin-bottom: 1rem;
-      padding: .75rem;
-      border: 1px solid #ccc;
-      border-radius: .5rem;
-    }
-    .workout-log__recorded-sets h3 {
-      margin-top: 0;
-    }
-    .workout-log__recorded-sets ol {
-      margin-bottom: 0;
-      padding-left: 1.5rem;
-    }
-    .workout-log__post-save-actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: .75rem;
-    }
-    .workout-log__post-save-actions h3 {
-      grid-column: 1 / -1;
-      margin: 0;
-    }
-    .workout-log__rest-button,
-    .workout-log__continue-button {
-      font-weight: 700;
-    }
-    .workout-log__complete {
-      padding: 1rem;
-      border: 2px solid #1769aa;
-      border-radius: .5rem;
-      font-weight: 700;
-      text-align: center;
-    }
-    .workout-log__form,
-    .workout-log__sets {
-      display: grid;
-      gap: 1rem;
-    }
-    .workout-log__field {
-      display: grid;
-      gap: .35rem;
-      flex: 1;
-    }
-    .workout-log__set {
-      display: flex;
-      gap: .75rem;
-      margin: 0;
-      padding: .75rem;
-    }
-    @media (max-width: 28rem) {
-      .workout-log__calendar-navigation {
-        grid-template-columns: 1fr 1fr;
-      }
-      .workout-log__calendar-navigation h2 {
-        grid-column: 1 / -1;
-        grid-row: 1;
-      }
-      .workout-log__calendar-day {
-        padding: .3rem;
-      }
-      .workout-log button.workout-log__calendar-day {
-        min-height: 3.75rem;
-      }
-      .workout-log__post-save-actions {
-        grid-template-columns: 1fr;
-      }
-      .workout-log__post-save-actions h3 {
-        grid-column: auto;
-      }
-      .workout-log__add-form-actions {
-        grid-template-columns: 1fr;
-      }
-      .workout-log__set {
-        display: grid;
-      }
-    }
-  `;
-  document.head.append(style);
+    row.append(name, value);
+    list.append(row);
+  });
+  bodyCard.append(bodyHeading, note, list);
+  homeScreen.append(bodyCard);
+
+  const weekCard = document.createElement("section");
+  weekCard.className = "app-card";
+  const weekHeading = document.createElement("h2");
+  weekHeading.textContent = "今週の取り組み";
+  const weekText = document.createElement("p");
+  weekText.textContent = `月曜からの1週間で、${week.trainedDates.length}日トレーニングしています。`;
+  const weekdays = document.createElement("div");
+  weekdays.className = "home-weekdays";
+  WEEKDAY_LABELS.forEach((label, index) => {
+    const date = addDays(week.weekStart, index);
+    const item = document.createElement("div");
+    const trained = week.trainedDates.includes(date);
+    item.className = trained ? "home-weekday home-weekday--done" : "home-weekday";
+    item.append(label);
+    const mark = document.createElement("small");
+    mark.textContent = trained ? "実施" : "—";
+    item.append(mark);
+    weekdays.append(item);
+  });
+  weekCard.append(weekHeading, weekText, weekdays);
+  homeScreen.append(weekCard);
+
+  const calendarCard = document.createElement("section");
+  calendarCard.className = "app-card";
+  const calendarHeading = document.createElement("h2");
+  calendarHeading.textContent = "カレンダー";
+  const calendarText = document.createElement("p");
+  calendarText.className = "app-muted";
+  calendarText.textContent = "過去の記録を日付から振り返ります。";
+  calendarCard.append(
+    calendarHeading,
+    calendarText,
+    createButton(
+      "カレンダーを開く",
+      () => {
+        document.dispatchEvent(
+          new CustomEvent("app:navigate", {
+            detail: { screenName: "calendar", source: "home" },
+          }),
+        );
+      },
+      "app-secondary",
+    ),
+  );
+  homeScreen.append(calendarCard);
 }
 
 function ensureWorkoutLogInitialized() {
@@ -952,28 +1147,33 @@ function ensureWorkoutLogInitialized() {
 
   isWorkoutLogInitialized = true;
   readWorkoutData();
-  installWorkoutLogStyles();
   workoutScreen.replaceChildren();
-  workoutScreen.classList.add("workout-log");
-
+  workoutScreen.classList.add("app-screen", "workout-log");
   const heading = document.createElement("h1");
   heading.textContent = "トレーニング記録";
-
   workoutStatus = document.createElement("p");
-  workoutStatus.className = "workout-log__status";
+  workoutStatus.className = "app-status";
   workoutStatus.setAttribute("role", "status");
-
   workoutContent = document.createElement("div");
   workoutScreen.append(heading, workoutStatus, workoutContent);
   return true;
 }
 
-function initializeWorkoutLog() {
-  if (!ensureWorkoutLogInitialized()) {
+function initializeHome() {
+  homeScreen = document.querySelector("#home-screen");
+
+  if (!homeScreen) {
     return;
   }
 
-  renderCalendar();
+  homeScreen.classList.add("app-screen", "home");
+  isHomeInitialized = true;
+  readWorkoutData();
+  renderHome();
+}
+
+function initializeWorkoutLog() {
+  startTodayWorkout();
 }
 
 function resumeWorkoutAfterRest(returnContext) {
@@ -1014,8 +1214,20 @@ function resumeWorkoutAfterRest(returnContext) {
 
   selectedWorkoutDate = returnContext.date;
   selectedBodyPart = exercise.bodyPart;
+  navigationSource = "home";
   renderWorkoutEntry(exercise.id);
   setWorkoutStatus("休憩が終了しました。次のセットを記録できます");
 }
 
+window.initializeHome = initializeHome;
+window.initializeWorkoutLog = initializeWorkoutLog;
+window.startTodayWorkout = startTodayWorkout;
+window.openWorkoutCalendar = openWorkoutCalendar;
+window.openDailyRecords = openDailyRecords;
 window.resumeWorkoutAfterRest = resumeWorkoutAfterRest;
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initializeHome, { once: true });
+} else {
+  initializeHome();
+}

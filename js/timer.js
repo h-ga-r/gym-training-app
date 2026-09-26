@@ -352,61 +352,7 @@ function createTimerInterface() {
 }
 
 function installTimerStyles() {
-  const style = document.createElement("style");
-  style.textContent = `
-    .interval-timer {
-      box-sizing: border-box;
-      max-width: 36rem;
-      margin: 0 auto;
-      padding: 1.25rem;
-      text-align: center;
-    }
-    .interval-timer__time {
-      display: block;
-      margin: 1rem 0 .25rem;
-      font: 700 clamp(4rem, 22vw, 8rem)/1 ui-monospace, monospace;
-      font-variant-numeric: tabular-nums;
-    }
-    .interval-timer__status {
-      min-height: 1.5em;
-      margin-bottom: 1.5rem;
-    }
-    .interval-timer__presets {
-      display: grid;
-      gap: .75rem;
-    }
-    .interval-timer__preset {
-      display: grid;
-      grid-template-columns: 1fr 1.5fr 1fr;
-      gap: .5rem;
-    }
-    .interval-timer button {
-      min-height: 3rem;
-      padding: .6rem;
-      font: inherit;
-      touch-action: manipulation;
-    }
-    .interval-timer__start {
-      font-weight: 700;
-    }
-    .interval-timer__cancel {
-      width: 100%;
-      margin-top: 1.25rem;
-    }
-    @keyframes interval-timer-flash {
-      0%, 49% { background: #111; color: #fff; }
-      50%, 100% { background: #fff; color: #111; }
-    }
-    body.interval-timer-alarm {
-      animation: interval-timer-flash .8s steps(1, end) infinite;
-    }
-    @media (prefers-reduced-motion: reduce) {
-      body.interval-timer-alarm {
-        animation-duration: 1.6s;
-      }
-    }
-  `;
-  document.head.append(style);
+  // 見た目は style.css に集約。タイマー動作はこのまま維持する。
 }
 
 function initializeTimer() {

@@ -2,23 +2,26 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Gym Training App</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20260926-home">
   </head>
   <body>
-    <nav aria-label="画面切り替え">
+    <nav class="app-nav" aria-label="画面切り替え">
+      <button type="button" data-screen-target="home" aria-current="page">ホーム</button>
+      <button type="button" data-screen-target="workout-log">記録</button>
       <button type="button" data-screen-target="timer">タイマー</button>
-      <button type="button" data-screen-target="workout-log">記録する</button>
+      <button type="button" data-screen-target="calendar">カレンダー</button>
     </nav>
 
     <main>
-      <section id="timer-screen" data-screen>タイマー画面</section>
+      <section id="home-screen" data-screen>ホーム画面</section>
+      <section id="timer-screen" data-screen hidden>タイマー画面</section>
       <section id="workout-log-screen" data-screen hidden>記録画面</section>
     </main>
 
-    <script src="js/timer.js?v=20260919"></script>
-    <script src="js/workoutLog.js?v=20260919"></script>
-    <script type="module" src="js/main.js?v=20260919"></script>
+    <script src="js/timer.js?v=20260926-home"></script>
+    <script src="js/workoutLog.js?v=20260926-home"></script>
+    <script type="module" src="js/main.js?v=20260926-home"></script>
   </body>
 </html>
