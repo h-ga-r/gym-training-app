@@ -1,6 +1,7 @@
 const ENTRY_DRAFT_KEY = "gymTrainingApp.entryDraft";
 const BODY_PARTS = ["胸", "背中", "脚", "肩", "腕", "腹", "有酸素", "その他"];
 const WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
+const REP_VALUES = Array.from({ length: 20 }, (_, index) => index + 1);
 
 let workoutScreen;
 let workoutContent;
@@ -842,9 +843,10 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
     value: initialWeight,
     inputMode: "decimal",
   });
-  const repChoices = ["3", "5", "6", "9", "10", "12", "15", "18", "20"].map(
-    (value) => ({ value, label: value }),
-  );
+  const repChoices = REP_VALUES.map((value) => ({
+    value: String(value),
+    label: String(value),
+  }));
   repChoices.push({ value: "failure", label: "限界まで" });
   const { label: repsLabel, select: repsInput } = createSelect(
     "回数",
@@ -905,7 +907,7 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
       !Number.isFinite(weight) ||
       weight < 0 ||
       (!toFailure &&
-        (!Number.isInteger(reps) || ![3, 5, 6, 9, 10, 12, 15, 18, 20].includes(reps)))
+        (!Number.isInteger(reps) || !REP_VALUES.includes(reps)))
     ) {
       setWorkoutStatus("セット、重量、回数を正しく入力してください", true);
       return;
