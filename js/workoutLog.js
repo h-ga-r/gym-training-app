@@ -1,4 +1,3 @@
-const WORKOUT_STORAGE_KEY = "gymTrainingApp.workoutData";
 const ENTRY_DRAFT_KEY = "gymTrainingApp.entryDraft";
 const BODY_PARTS = ["胸", "背中", "脚", "肩", "腕", "腹", "有酸素", "その他"];
 const WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
@@ -16,45 +15,25 @@ let isHomeInitialized = false;
 let displayedCalendarYear;
 let displayedCalendarMonth;
 
-function createEmptyWorkoutData() {
-  return {
-    exerciseMaster: [],
-    workoutLogs: [],
-    userProfile: {},
-  };
-}
-
 function readWorkoutData() {
   try {
-    const savedData = JSON.parse(localStorage.getItem(WORKOUT_STORAGE_KEY));
-
-    if (savedData && typeof savedData === "object") {
-      return {
-        exerciseMaster: Array.isArray(savedData.exerciseMaster)
-          ? savedData.exerciseMaster
-          : [],
-        workoutLogs: Array.isArray(savedData.workoutLogs)
-          ? savedData.workoutLogs
-          : [],
-        userProfile:
-          savedData.userProfile &&
-          typeof savedData.userProfile === "object" &&
-          !Array.isArray(savedData.userProfile)
-            ? savedData.userProfile
-            : {},
-      };
-    }
-  } catch {
-    // 壊れた保存データは初期状態に戻す。
+    return workoutStore.read();
+  } catch (error) {
+    showRecordProblem(error.message);
+    return null;
   }
-
-  const emptyData = createEmptyWorkoutData();
-  saveWorkoutData(emptyData);
-  return emptyData;
 }
 
 function saveWorkoutData(data) {
-  localStorage.setItem(WORKOUT_STORAGE_KEY, JSON.stringify(data));
+  try {
+    workoutStore.save(data);
+    document.getElementById("record-problem").hidden = true;
+    return true;
+  } catch (error) {
+    showRecordProblem(error.message);
+    setWorkoutStatus("保存していません。入力内容を確認してください。", true);
+    return false;
+  }
 }
 
 function createId() {
@@ -371,6 +350,7 @@ function renderCalendar(year = new Date().getFullYear(), month = new Date().getM
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const data = readWorkoutData();
+  if (!data) return;
   const todayString = getLocalDateString();
 
   for (let index = 0; index < firstWeekday; index += 1) {
@@ -439,6 +419,7 @@ function renderDailyRecords(date) {
   records.className = "workout-log__daily-records";
 
   const data = readWorkoutData();
+  if (!data) return;
   const logs = data.workoutLogs.filter((log) => log.date === date);
   const exerciseMap = getExerciseMap(data);
   const logsByExercise = new Map();
@@ -560,6 +541,7 @@ function renderAddExerciseForm(bodyPart) {
     }
 
     const data = readWorkoutData();
+    if (!data) return;
     data.exerciseMaster.push({
       id: createId(),
       name,
@@ -567,7 +549,7 @@ function renderAddExerciseForm(bodyPart) {
       lastUsedAt: 0,
       isHidden: false,
     });
-    saveWorkoutData(data);
+    if (!saveWorkoutData(data)) return;
     renderExerciseSelection(bodyPart);
     setWorkoutStatus(`「${name}」を追加しました`);
   });
@@ -580,6 +562,7 @@ function renderAddExerciseForm(bodyPart) {
 
 function hideExercise(exerciseId, bodyPart) {
   const data = readWorkoutData();
+  if (!data) return;
   const exercise = data.exerciseMaster.find((item) => item.id === exerciseId);
 
   if (!exercise || !window.confirm(`「${exercise.name}」を一覧から削除しますか？`)) {
@@ -587,7 +570,7 @@ function hideExercise(exerciseId, bodyPart) {
   }
 
   exercise.isHidden = true;
-  saveWorkoutData(data);
+  if (!saveWorkoutData(data)) return;
   renderExerciseSelection(bodyPart);
   setWorkoutStatus(`「${exercise.name}」を一覧から削除しました`);
 }
@@ -607,8 +590,9 @@ function renderExerciseSelection(bodyPart) {
   );
   const exerciseList = document.createElement("div");
   exerciseList.className = "workout-log__exercise-list";
-  const exercises = readWorkoutData()
-    .exerciseMaster.filter(
+  const data = readWorkoutData();
+  if (!data) return;
+  const exercises = data.exerciseMaster.filter(
       (exercise) => exercise.bodyPart === bodyPart && !exercise.isHidden,
     )
     .sort((a, b) => (Number(b.lastUsedAt) || 0) - (Number(a.lastUsedAt) || 0));
@@ -710,7 +694,9 @@ function startWorkoutRest(workoutDate, exerciseId) {
     return;
   }
 
-  const exercise = readWorkoutData().exerciseMaster.find(
+  const data = readWorkoutData();
+  if (!data) return;
+  const exercise = data.exerciseMaster.find(
     (item) => item.id === exerciseId && !item.isHidden,
   );
 
@@ -737,6 +723,7 @@ function startWorkoutRest(workoutDate, exerciseId) {
 
 function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
   const data = readWorkoutData();
+  if (!data) return;
   const exercise = data.exerciseMaster.find(
     (item) => item.id === exerciseId && !item.isHidden,
   );
@@ -931,6 +918,7 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
     }
 
     const latestData = readWorkoutData();
+    if (!latestData) return;
     const latestExercise = latestData.exerciseMaster.find(
       (item) => item.id === selectedExerciseId && !item.isHidden,
     );
@@ -960,7 +948,7 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
       recordedAt: Date.now(),
     });
     latestExercise.lastUsedAt = Date.now();
-    saveWorkoutData(latestData);
+    if (!saveWorkoutData(latestData)) return;
     clearEntryDraft();
     renderWorkoutEntry(latestExercise.id, { showPostSaveActions: true });
     setWorkoutStatus(`${setNumber}セット目を保存しました`);
@@ -974,6 +962,10 @@ function renderWorkoutEntry(exerciseId, { showPostSaveActions = false } = {}) {
 function renderHome() {
   const today = getLocalDateString();
   const data = readWorkoutData();
+  if (!data) {
+    homeScreen.textContent = "記録を表示できません。下の「記録のバックアップ・復元」から確認できます。";
+    return;
+  }
   const previousDate = getLatestDateBefore(data, today);
   const todayCounts = countTodayLogs(data, today);
   const lastDates = getLastDateByBodyPart(data);
@@ -1146,7 +1138,6 @@ function ensureWorkoutLogInitialized() {
   }
 
   isWorkoutLogInitialized = true;
-  readWorkoutData();
   workoutScreen.replaceChildren();
   workoutScreen.classList.add("app-screen", "workout-log");
   const heading = document.createElement("h1");
@@ -1168,7 +1159,6 @@ function initializeHome() {
 
   homeScreen.classList.add("app-screen", "home");
   isHomeInitialized = true;
-  readWorkoutData();
   renderHome();
 }
 
@@ -1197,7 +1187,9 @@ function resumeWorkoutAfterRest(returnContext) {
     return;
   }
 
-  const exercise = readWorkoutData().exerciseMaster.find(
+  const data = readWorkoutData();
+  if (!data) return;
+  const exercise = data.exerciseMaster.find(
     (item) => item.id === returnContext.exerciseId,
   );
 

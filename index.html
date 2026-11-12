@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Gym Training App</title>
-    <link rel="stylesheet" href="style.css?v=20260926-home">
+    <link rel="stylesheet" href="style.css?v=20261112-records">
   </head>
   <body>
     <nav class="app-nav" aria-label="画面切り替え">
@@ -15,13 +15,36 @@
     </nav>
 
     <main>
+      <div id="record-problem" class="app-screen app-status--error" role="alert" hidden>
+        <p id="record-problem-text"></p>
+        <button type="button" id="open-record-tools">記録のバックアップ・復元を開く</button>
+      </div>
       <section id="home-screen" data-screen>ホーム画面</section>
       <section id="timer-screen" data-screen hidden>タイマー画面</section>
       <section id="workout-log-screen" data-screen hidden>記録画面</section>
+      <details id="record-backup" class="app-screen">
+        <summary>記録のバックアップ・復元</summary>
+        <p>種目とトレーニング記録をファイルに保存できます。iCloud Driveなどに残しておくと、機種変更後やサイトデータを消した後でも読み戻せます。</p>
+        <button type="button" id="record-export">ファイルに保存</button>
+        <label class="backup-file">保存したファイルから復元
+          <input id="record-import" type="file" accept=".json,application/json">
+        </label>
+        <button type="button" id="record-previous">この端末にある保存前の控えを確認</button>
+        <button type="button" id="record-raw" hidden>読み取れない元データを書き出す</button>
+        <div class="app-card" id="record-preview" hidden>
+          <p id="record-counts"></p>
+          <p>現在の記録を優先し、未登録の種目・セットを追加します。</p>
+          <button type="button" id="record-confirm">この内容で復元</button>
+          <button type="button" id="record-cancel">キャンセル</button>
+        </div>
+        <p role="status" id="record-message"></p>
+      </details>
     </main>
 
     <script src="js/timer.js?v=20260926-home"></script>
-    <script src="js/workoutLog.js?v=20260926-home"></script>
+    <script src="js/workoutStore.js?v=20261112-records"></script>
+    <script src="js/recordBackup.js?v=20261112-records"></script>
+    <script src="js/workoutLog.js?v=20261112-records"></script>
     <script type="module" src="js/main.js?v=20260926-home"></script>
   </body>
 </html>

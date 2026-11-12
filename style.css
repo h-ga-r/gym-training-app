@@ -136,6 +136,12 @@ main {
   color: var(--ink-soft);
 }
 
+#home-screen[hidden] ~ #record-backup { display: none; }
+#record-backup summary { padding-block: .65rem; cursor: pointer; font-weight: 700; }
+#record-backup button { margin: .25rem 0; }
+.backup-file { display: grid; gap: .3rem; margin-block: 1rem; }
+.backup-file input { width: 100%; min-height: var(--tap); }
+
 .app-primary {
   width: 100%;
   min-height: 3.4rem;
